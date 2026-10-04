@@ -108,7 +108,7 @@ export function runTutorial(root: HTMLElement, rules: RulesConfig, onDone: () =>
     },
     {
       title: "Face-down cards",
-      text: `${rules.faceDown} cells are dealt face down. Claim one and you see it — your opponent doesn't until scoring. The badge marks cards only you have seen. Their face-down claims stay hidden from you the same way.`,
+      text: `${rules.faceDown} cells are dealt face down. Claim one and you see it — your opponent doesn't until scoring. The badge marks cards only you have seen. Their face-down claims stay hidden from you the same way. Tap the % badge, or press and hold a face-down card, to see what it could be.`,
       demo: () => {
         const fd = (1 << 2) | (1 << 7) | (1 << 9) | (1 << 13);
         let s = fromLayout(DEMO, fd, rules);

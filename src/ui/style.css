@@ -117,7 +117,7 @@ button { font: inherit; color: inherit; }
 
 .grid {
   display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
-  width: min(100%, calc((100dvh - 290px) / 1.43));
+  width: min(100%, calc((100dvh - 336px) / 1.43));
   min-width: min(100%, 250px);
   margin: 0 auto;
 }
@@ -244,3 +244,54 @@ button.cell { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- combos, toasts, odds ---------- */
+
+.chips { display: flex; flex-wrap: wrap; gap: 4px; min-height: 20px; }
+.chip {
+  font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+  background: rgba(216, 180, 90, 0.2); color: var(--gold-2); border: 1px solid rgba(216, 180, 90, 0.35);
+}
+.chip.countered { background: rgba(224, 100, 92, 0.15); color: #ffb3ac; border-color: rgba(224, 100, 92, 0.35); text-decoration: line-through; }
+.chip.empty { background: none; border-color: transparent; color: var(--muted); font-weight: 500; padding-left: 0; }
+.chip.good { background: rgba(143, 214, 162, 0.18); color: var(--win); border-color: rgba(143, 214, 162, 0.4); text-decoration: none; }
+.chip.bad { background: rgba(224, 100, 92, 0.15); color: #ffb3ac; border-color: rgba(224, 100, 92, 0.35); text-decoration: none; }
+
+.hand-card.pop { animation: pop 0.9s ease-out 2; }
+@keyframes pop { 40% { transform: translateY(-8px) scale(1.12); filter: drop-shadow(0 0 8px rgba(240, 212, 138, 0.95)); } }
+.hand-card.hit { animation: hit 0.6s ease-in-out 3; }
+@keyframes hit { 50% { transform: rotate(-6deg); filter: drop-shadow(0 0 6px rgba(224, 100, 92, 0.95)) grayscale(0.5); } }
+
+.toasts {
+  position: fixed; left: 50%; top: 38%; transform: translateX(-50%); z-index: 20;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; width: min(92vw, 420px);
+}
+.toast {
+  padding: 10px 16px; border-radius: 14px; font-weight: 800; font-size: 16px; text-align: center;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); opacity: 0;
+  animation: toast 2.2s ease-out forwards;
+}
+.toast.good { background: var(--gold); color: #1d1606; }
+.toast.theirs { background: #e8e1cf; color: #1b1b1f; }
+.toast.bad { background: #b8433c; color: #fff; }
+@keyframes toast {
+  0% { opacity: 0; transform: translateY(20px) scale(0.8); }
+  12% { opacity: 1; transform: translateY(0) scale(1.06); }
+  20% { transform: scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-24px); }
+}
+
+.cell { -webkit-touch-callout: none; user-select: none; }
+.odds-badge {
+  position: absolute; right: -4px; top: -4px; width: 26px; height: 26px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; z-index: 2;
+  background: var(--ink); color: var(--felt); font-size: 12px; font-weight: 800; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+.cell.dim .odds-badge { opacity: 1; }
+.hand-card.tappable { cursor: pointer; }
+.odds p { font-size: 14px; margin: 0 0 8px; }
+.odds-row { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--panel-line); }
+.odds-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.odds-tags .chip { white-space: normal; }
+.odds-pct { color: var(--gold-2); font-size: 16px; }

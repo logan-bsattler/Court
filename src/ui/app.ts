@@ -1,7 +1,7 @@
 import { type Difficulty } from "../ai/agent";
 import { AiClient } from "../ai/client";
 import { cardSvg } from "./cards";
-import { type Card, bits, cardLabel } from "../engine/cards";
+import { type Card, SUIT_SYMBOLS, bits, cardLabel } from "../engine/cards";
 import {
   type GameState, applyClaim, isFreeClaim, isOver, toMove, viewFor,
 } from "../engine/game";
@@ -15,6 +15,7 @@ import {
   startNextDeal, tiebreakTotals, totals, verdict,
 } from "./match";
 import { load, save } from "./storage";
+import { type InsightEvent, eventsBetween, hiddenOdds, visibleAllocation } from "./insight";
 import { comboName, comboTable, counterText } from "./text";
 import { runTutorial } from "./tutorial";
 
@@ -33,6 +34,8 @@ export class App {
   /** Suggested claim for the current position, if the player asked. */
   private hint: number | undefined;
   private hintPending = false;
+  /** Combinations and counters from the last claim, to animate on the next render. */
+  private events: InsightEvent[] = [];
   private status = "";
   private statusIsError = false;
 
@@ -128,7 +131,7 @@ export class App {
       if (!live()) return; // left the screen
       await sleep(Math.max(0, AI_MIN_THINK_MS - (performance.now() - started)));
       if (!live()) return;
-      m.state = applyClaim(m.state, move);
+      this.claim(move);
       this.flash = move;
     }
     this.status = "Grid empty — scoring…";
@@ -150,11 +153,79 @@ export class App {
   private onHumanClaim(pos: number): void {
     const m = this.m;
     if (toMove(m.state) !== humanSeat(m.dealIndex)) return;
-    m.state = applyClaim(m.state, pos);
+    this.claim(pos);
     this.flash = undefined;
     this.hint = undefined;
     this.hintPending = false;
     void this.playTurns();
+  }
+
+  /** Apply a claim and note what it visibly changed, from the human's point of view. */
+  private claim(pos: number): void {
+    const m = this.m;
+    const me = humanSeat(m.dealIndex);
+    const before = viewFor(m.state, me);
+    m.state = applyClaim(m.state, pos);
+    this.events = eventsBetween(before, viewFor(m.state, me));
+  }
+
+  /** Chips for the combinations a player visibly holds right now. */
+  private comboChips(view: ReturnType<typeof viewFor>, owner: 0 | 1): HTMLElement {
+    const a = visibleAllocation(view, owner);
+    const chips: HTMLElement[] = a.combos.map((c) =>
+      el("span", { class: `chip ${c.countered ? "countered" : ""}`, text: `${comboName(c)} ${c.value}` }));
+    for (const k of a.counters) {
+      chips.push(el("span", { class: "chip countered", text: `${k.kind === "deposition" ? "Marriage" : "Service"} ${SUIT_SYMBOLS[k.suit]} ✗` }));
+    }
+    return el("div", { class: "chips", attrs: { "aria-label": "Combinations held" } },
+      ...(chips.length ? chips : [el("span", { class: "chip empty", text: "No combinations yet" })]));
+  }
+
+  /** Toasts and card pulses for the last claim's events. */
+  private playEvents(): void {
+    const events = this.events;
+    this.events = [];
+    if (!events.length) return;
+    const me = humanSeat(this.m.dealIndex);
+    let layer = document.querySelector<HTMLElement>(".toasts");
+    if (!layer) {
+      layer = el("div", { class: "toasts", attrs: { "aria-live": "polite" } });
+      document.body.append(layer);
+    }
+    events.forEach((e, i) => {
+      const mine = (e.type === "combo" ? e.owner : e.victim) === me;
+      const who = mine ? "You" : "Opponent";
+      const text = e.type === "combo"
+        ? `${who}: ${comboName(e.combo)} +${e.combo.value}`
+        : `${mine ? "Your" : "Opponent's"} ${e.counter.kind === "deposition" ? "Marriage" : "Service"} ${SUIT_SYMBOLS[e.counter.suit]} ${e.counter.kind === "deposition" ? "deposed" : "countered"} by ${cardLabel(e.counter.by)}!`;
+      const cls = e.type === "combo" ? (mine ? "good" : "theirs") : (mine ? "bad" : "good");
+      const toast = el("div", { class: `toast ${cls}`, text, attrs: { style: `animation-delay:${i * 0.25}s` } });
+      layer!.append(toast);
+      setTimeout(() => toast.remove(), 2400 + i * 250);
+      const mask = e.type === "combo" ? e.combo.mask : e.counter.mask;
+      const side = mine ? ".player.me" : ".player.opp";
+      for (const c of bits(mask)) {
+        document.querySelector(`${side} .hand-card[data-card="${c}"]`)?.classList.add(e.type === "combo" ? "pop" : "hit");
+      }
+    });
+  }
+
+  /** Sheet listing what an unseen card could be. */
+  private showOdds(): void {
+    const m = this.m;
+    const view = viewFor(m.state, humanSeat(m.dealIndex));
+    const odds = hiddenOdds(view);
+    const pct = odds.length ? Math.round(100 / odds.length) : 0;
+    const rows = odds.map((o) => el("div", { class: "odds-row" },
+      el("div", { class: "mini", html: cardSvg(o.card) }),
+      el("div", { class: "odds-tags" },
+        ...o.completes.map((c) => el("span", { class: "chip good", text: `completes your ${comboName(c)}` })),
+        ...o.counters.map((c) => el("span", { class: "chip bad", text: `counters your ${comboName(c)} if they get it` })),
+        !o.completes.length && !o.counters.length ? el("span", { class: "muted", text: "—" }) : null),
+      el("b", { class: "odds-pct", text: `${pct}%` })));
+    this.overlay("What could it be?", el("div", { class: "odds" },
+      el("p", { text: `It's one of the ${odds.length} cards you haven't seen. Each is equally likely: about ${pct}%.` }),
+      ...rows), [["Close", () => {}]]);
   }
 
   private hintSwitch(): HTMLElement {
@@ -221,6 +292,7 @@ export class App {
       interactive: humanTurn,
       flash: this.flash,
       hint: humanTurn ? this.hint : undefined,
+      onOdds: () => this.showOdds(),
       onClaim: (p) => this.onHumanClaim(p),
       onIllegal: () => {
         this.status = "Not in the row or column of the empty cell.";
@@ -240,11 +312,13 @@ export class App {
             el("span", { text: `Opponent · ${this.difficulty}` }),
             el("span", { class: "muted", text: oppHidden ? `${oppHidden} unseen` : "" }),
           ),
-          renderHand(view, opp, 8, this.flash !== undefined),
+          renderHand(view, opp, 8, this.flash !== undefined, () => this.showOdds()),
+          this.comboChips(view, opp),
         ),
         status,
         grid,
         el("section", { class: "player me" },
+          this.comboChips(view, me),
           renderHand(view, me),
           el("div", { class: "player-label" },
             el("span", { text: "You" }),
@@ -256,6 +330,7 @@ export class App {
         ),
       ),
     );
+    this.playEvents();
   }
 
   private confirmQuit(): void {

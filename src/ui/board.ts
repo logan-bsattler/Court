@@ -12,6 +12,32 @@ export interface BoardOptions {
   flash?: number;
   /** Position to mark as the suggested claim. */
   hint?: number;
+  /** Show odds for an unseen card (via its % badge or a long press). */
+  onOdds?: (pos: number) => void;
+}
+
+const LONG_PRESS_MS = 450;
+
+/** Long press calls `fn` and swallows the click that follows it. */
+function onLongPress(node: HTMLElement, fn: () => void): void {
+  let timer = 0;
+  let fired = false;
+  const cancel = () => clearTimeout(timer);
+  node.addEventListener("pointerdown", () => {
+    fired = false;
+    timer = window.setTimeout(() => { fired = true; fn(); }, LONG_PRESS_MS);
+  });
+  for (const ev of ["pointerup", "pointerleave", "pointercancel"]) node.addEventListener(ev, cancel);
+  node.addEventListener("click", (e) => { if (fired) { e.stopImmediatePropagation(); e.preventDefault(); fired = false; } }, true);
+  node.addEventListener("contextmenu", (e) => e.preventDefault());
+}
+
+function oddsBadge(pos: number, onOdds: (pos: number) => void): HTMLElement {
+  return el("span", {
+    class: "odds-badge", text: "%",
+    attrs: { role: "button", "aria-label": "What could this card be?", tabindex: "0" },
+    on: { click: (e) => { e.stopPropagation(); onOdds(pos); } },
+  });
 }
 
 /** The 4×4 grid as the viewing player sees it. */
@@ -50,6 +76,10 @@ export function renderGrid(view: PlayerView, opts: BoardOptions): HTMLElement {
         },
       },
     });
+    if (card === null && opts.onOdds) {
+      btn.append(oddsBadge(p, opts.onOdds));
+      onLongPress(btn, () => opts.onOdds!(p));
+    }
     grid.append(btn);
   }
   return grid;
@@ -59,7 +89,9 @@ export function renderGrid(view: PlayerView, opts: BoardOptions): HTMLElement {
  * One player's claimed cards in claim order, as the viewing player sees them.
  * Face-down cards the viewer took are marked as hidden from the opponent.
  */
-export function renderHand(view: PlayerView, owner: 0 | 1, size = 8, highlightLast = false): HTMLElement {
+export function renderHand(
+  view: PlayerView, owner: 0 | 1, size = 8, highlightLast = false, onOdds?: (pos: number) => void,
+): HTMLElement {
   const claims = view.claims[owner];
   const row = el("div", { class: "hand" });
   for (let i = 0; i < size; i++) {
@@ -72,6 +104,13 @@ export function renderHand(view: PlayerView, owner: 0 | 1, size = 8, highlightLa
     const secret = owner === view.player && ((view.faceDown >> p) & 1) === 1;
     const cls = ["hand-card", secret ? "secret" : "", highlightLast && i === claims.length - 1 ? "new" : ""].join(" ");
     const node = el("div", { class: cls, html: card === null ? backSvg() : cardSvg(card) });
+    if (card !== null) node.dataset.card = String(card);
+    if (card === null && onOdds) {
+      node.classList.add("tappable");
+      node.setAttribute("role", "button");
+      node.setAttribute("aria-label", "Opponent's face-down card: what could it be?");
+      node.addEventListener("click", () => onOdds(p));
+    }
     if (secret) node.append(el("span", { class: "badge", text: "hidden", attrs: { title: "Your opponent has not seen this card" } }));
     row.append(node);
   }
