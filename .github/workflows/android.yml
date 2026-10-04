@@ -1,0 +1,63 @@
+name: Android build
+
+# Builds an installable debug APK on every push. When the signing secrets
+# are configured (see docs/ANDROID.md) it also builds a signed release
+# App Bundle (.aab) for Google Play.
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    env:
+      COURT_VERSION_CODE: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: court-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Decode signing key
+        id: key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.COURT_KEYSTORE_BASE64 }}
+        if: env.KEYSTORE_BASE64 != ''
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/court.keystore"
+          echo "path=$RUNNER_TEMP/court.keystore" >> "$GITHUB_OUTPUT"
+      - name: Build signed release bundle
+        if: steps.key.outputs.path != ''
+        working-directory: android
+        env:
+          COURT_KEYSTORE_PATH: ${{ steps.key.outputs.path }}
+          COURT_KEYSTORE_PASSWORD: ${{ secrets.COURT_KEYSTORE_PASSWORD }}
+          COURT_KEY_ALIAS: ${{ secrets.COURT_KEY_ALIAS }}
+          COURT_KEY_PASSWORD: ${{ secrets.COURT_KEY_PASSWORD }}
+        run: ./gradlew bundleRelease --no-daemon
+      - uses: actions/upload-artifact@v4
+        if: steps.key.outputs.path != ''
+        with:
+          name: court-release-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
