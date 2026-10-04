@@ -10,6 +10,8 @@ export interface BoardOptions {
   onIllegal?: (pos: number) => void;
   /** Position to pulse, e.g. the cell the opponent just vacated. */
   flash?: number;
+  /** Position to mark as the suggested claim. */
+  hint?: number;
 }
 
 /** The 4×4 grid as the viewing player sees it. */
@@ -24,6 +26,7 @@ export function renderGrid(view: PlayerView, opts: BoardOptions): HTMLElement {
     if ((line >> p) & 1) classes.push("line");
     if (p === view.ref) classes.push("ref");
     if (p === opts.flash) classes.push("flash");
+    if (p === opts.hint) classes.push("hint");
     if (!occupied) {
       classes.push("empty");
       grid.append(el("div", { class: classes.join(" "), attrs: { "aria-hidden": "true" } }));

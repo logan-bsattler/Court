@@ -16,6 +16,8 @@ export interface Match {
   state: GameState;
   /** Results of finished deals, by deal index. */
   readonly results: DealResult[];
+  /** Number of hints the human asked for. */
+  hintsUsed: number;
 }
 
 /** The human is player 1 in the first deal and player 2 in the second. */
@@ -24,7 +26,7 @@ export const aiSeat = (dealIndex: number): Player => (1 - humanSeat(dealIndex)) 
 
 export function newMatch(rules: RulesConfig, seeds: readonly number[]): Match {
   if (seeds.length !== DEALS_PER_MATCH) throw new Error(`need ${DEALS_PER_MATCH} seeds`);
-  return { rules, seeds, dealIndex: 0, state: deal(seeds[0], rules), results: [] };
+  return { rules, seeds, dealIndex: 0, state: deal(seeds[0], rules), results: [], hintsUsed: 0 };
 }
 
 /** Record the finished current deal. */

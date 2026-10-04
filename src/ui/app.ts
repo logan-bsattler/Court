@@ -1,7 +1,7 @@
 import { type Difficulty } from "../ai/agent";
 import { AiClient } from "../ai/client";
 import { cardSvg } from "./cards";
-import { type Card, bits } from "../engine/cards";
+import { type Card, bits, cardLabel } from "../engine/cards";
 import {
   type GameState, applyClaim, isFreeClaim, isOver, toMove, viewFor,
 } from "../engine/game";
@@ -28,6 +28,10 @@ export class App {
   /** Bumped whenever the screen changes, so stale async AI turns stop. */
   private generation = 0;
   private flash: number | undefined;
+  private hintsOn = load("hints", false);
+  /** Suggested claim for the current position, if the player asked. */
+  private hint: number | undefined;
+  private hintPending = false;
   private status = "";
   private statusIsError = false;
 
@@ -68,6 +72,7 @@ export class App {
         el("div", { class: "menu" },
           el("label", { class: "label", text: "Opponent" }),
           seg,
+          this.hintSwitch(),
           button("Play match", () => this.startMatch(), "btn primary big"),
           button("How to play", () => this.tutorial(), `btn ${tutorialSeen ? "" : "pulse"}`),
           button("Rules", () => this.rulesSheet(), "btn ghost"),
@@ -93,6 +98,8 @@ export class App {
     const seeds = Array.from({ length: DEALS_PER_MATCH }, (_, i) => (base + i) >>> 0);
     this.match = newMatch(this.rules, seeds);
     this.flash = undefined;
+    this.hint = undefined;
+    this.hintPending = false;
     void this.playTurns();
   }
 
@@ -144,7 +151,42 @@ export class App {
     if (toMove(m.state) !== humanSeat(m.dealIndex)) return;
     m.state = applyClaim(m.state, pos);
     this.flash = undefined;
+    this.hint = undefined;
+    this.hintPending = false;
     void this.playTurns();
+  }
+
+  private hintSwitch(): HTMLElement {
+    const input = el("input", { attrs: { type: "checkbox", role: "switch" } });
+    input.checked = this.hintsOn;
+    input.addEventListener("change", () => {
+      this.hintsOn = input.checked;
+      save("hints", this.hintsOn);
+    });
+    return el("label", { class: "switch-row" },
+      el("span", {}, el("b", { text: "Hints" }), el("span", { class: "muted", text: " — show the best pick on request" })),
+      input);
+  }
+
+  /** Ask the hard-level AI for the best claim from the human's own view (it never sees unseen cards). */
+  private async requestHint(): Promise<void> {
+    const m = this.m;
+    const me = humanSeat(m.dealIndex);
+    if (this.hintPending || this.hint !== undefined || toMove(m.state) !== me) return;
+    const before = m.state;
+    this.hintPending = true;
+    this.status = "Finding the best pick…";
+    this.statusIsError = false;
+    this.renderGame(true);
+    const view = viewFor(before, me);
+    const pos = await this.ai.choose(view, "hard", aiMoveSeed(before) ^ 0x68696e74);
+    if (this.match !== m || m.state !== before) return; // moved on meanwhile
+    this.hintPending = false;
+    this.hint = pos;
+    m.hintsUsed++;
+    const c = view.cells[pos];
+    this.status = `Hint: ${c === null ? "the face-down card" : cardLabel(c)} looks best.`;
+    this.renderGame(true);
   }
 
   private renderGame(humanTurn: boolean): void {
@@ -177,6 +219,7 @@ export class App {
     const grid = renderGrid(view, {
       interactive: humanTurn,
       flash: this.flash,
+      hint: humanTurn ? this.hint : undefined,
       onClaim: (p) => this.onHumanClaim(p),
       onIllegal: () => {
         this.status = "Not in the row or column of the empty cell.";
@@ -204,6 +247,9 @@ export class App {
           renderHand(view, me),
           el("div", { class: "player-label" },
             el("span", { text: "You" }),
+            this.hintsOn && humanTurn
+              ? button(this.hintPending ? "Thinking…" : "Hint", () => void this.requestHint(), "btn hint-btn")
+              : null,
             el("span", { class: "muted", text: `${myScore} pts so far` }),
           ),
         ),
@@ -287,6 +333,7 @@ export class App {
       el("main", { class: "screen results" },
         el("h2", { text: "Match over" }),
         el("p", { class: `headline big ${o}`, text: headline }),
+        m.hintsUsed ? el("p", { class: "fineprint", text: `Hints used: ${m.hintsUsed}` }) : null,
         el("table", { class: "match-table" },
           el("thead", {}, el("tr", {}, el("th", { text: "" }), el("th", { text: "You" }), el("th", { text: "Opp." }))),
           el("tbody", {}, ...rows,
