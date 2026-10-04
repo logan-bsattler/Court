@@ -12,6 +12,8 @@ export interface BoardOptions {
   flash?: number;
   /** Position to mark as the suggested claim. */
   hint?: number;
+  /** Positions of cards the opponent needs to finish a Full Court or Coup. */
+  warn?: number[];
   /** Show odds for an unseen card (via its % badge or a long press). */
   onOdds?: (pos: number) => void;
 }
@@ -76,6 +78,10 @@ export function renderGrid(view: PlayerView, opts: BoardOptions): HTMLElement {
         },
       },
     });
+    if (opts.warn?.includes(p)) {
+      btn.classList.add("warned");
+      btn.append(el("span", { class: "warn-badge", text: "⚠", attrs: { title: "Your opponent needs this card" } }));
+    }
     if (card === null && opts.onOdds) {
       btn.append(oddsBadge(p, opts.onOdds));
       onLongPress(btn, () => opts.onOdds!(p));

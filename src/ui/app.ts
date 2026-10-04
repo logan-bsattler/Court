@@ -15,8 +15,8 @@ import {
   startNextDeal, tiebreakTotals, totals, verdict,
 } from "./match";
 import { load, save } from "./storage";
-import { type InsightEvent, eventsBetween, hiddenOdds, visibleAllocation } from "./insight";
-import { comboName, comboTable, counterText } from "./text";
+import { type InsightEvent, eventsBetween, hiddenOdds, threats, visibleAllocation } from "./insight";
+import { comboName, comboTable, counterText, setName } from "./text";
 import { runTutorial } from "./tutorial";
 import { cue, settings } from "./feedback";
 import { dailySeeds, utcDate } from "./daily";
@@ -201,6 +201,14 @@ export class App {
     for (const k of a.counters) {
       chips.push(el("span", { class: "chip countered", text: `${k.kind === "deposition" ? "Marriage" : "Service"} ${SUIT_SYMBOLS[k.suit]} ✗` }));
     }
+    if (owner !== view.player) {
+      for (const t of threats(view, owner)) {
+        chips.push(el("span", {
+          class: "chip warn",
+          text: `⚠ ${setName(t.kind, t.index)}: needs ${cardLabel(t.needs)}${t.pos === null ? " (unseen)" : ""}`,
+        }));
+      }
+    }
     return el("div", { class: "chips", attrs: { "aria-label": "Combinations held" } },
       ...(chips.length ? chips : [el("span", { class: "chip empty", text: "No combinations yet" })]));
   }
@@ -213,13 +221,22 @@ export class App {
     const me = humanSeat(this.m.dealIndex);
     const good = events.some((e) => (e.type === "combo" && e.owner === me) || (e.type === "countered" && e.victim !== me));
     const bad = events.some((e) => e.type === "countered" && e.victim === me);
-    setTimeout(() => cue(bad ? "countered" : good ? "combo" : "tap"), 120);
+    const warn = events.some((e) => e.type === "threat");
+    setTimeout(() => cue(bad ? "countered" : warn ? "warn" : good ? "combo" : "tap"), 120);
     let layer = document.querySelector<HTMLElement>(".toasts");
     if (!layer) {
       layer = el("div", { class: "toasts", attrs: { "aria-live": "polite" } });
       document.body.append(layer);
     }
     events.forEach((e, i) => {
+      if (e.type === "threat") {
+        const where = e.threat.pos === null ? " It's unseen: face down, or already in their hidden cards." : "";
+        const toast = el("div", { class: "toast warn", text: `Warning: opponent needs only ${cardLabel(e.threat.needs)} for a ${setName(e.threat.kind, e.threat.index)}!${where}`, attrs: { style: `animation-delay:${i * 0.25}s` } });
+        layer!.append(toast);
+        setTimeout(() => toast.remove(), 2400 + i * 250);
+        this.toastsUntil = Math.max(this.toastsUntil, performance.now() + 2200 + i * 250);
+        return;
+      }
       const mine = (e.type === "combo" ? e.owner : e.victim) === me;
       const who = mine ? "You" : "Opponent";
       const text = e.type === "combo"
@@ -308,6 +325,7 @@ export class App {
       interactive: humanTurn,
       flash: this.flash,
       hint: humanTurn ? this.hint : undefined,
+      warn: threats(view, opp).map((t) => t.pos).filter((p): p is number => p !== null),
       onOdds: () => this.showOdds(),
       onClaim: (p) => this.onHumanClaim(p),
       onIllegal: () => {

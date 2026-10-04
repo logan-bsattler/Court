@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { cardName, parseCard } from "../src/engine/cards";
-import { applyClaim, fromLayout, viewFor } from "../src/engine/game";
+import { type GameState, applyClaim, fromLayout, viewFor } from "../src/engine/game";
 import { DEFAULT_RULES } from "../src/engine/rules";
-import { eventsBetween, hiddenOdds, visibleAllocation } from "../src/ui/insight";
+import { eventsBetween, hiddenOdds, threats, visibleAllocation } from "../src/ui/insight";
 
 // row 0: Kh Qh Ah Jh   row 1: Ks Qs As Js   rows 2-3: diamonds, clubs
 const LAYOUT = "Kh Qh Ah Jh Ks Qs As Js Kd Qd Ad Jd Kc Qc Ac Jc".split(" ").map(parseCard);
@@ -49,5 +49,50 @@ describe("insight", () => {
     for (const o of odds) expect(o.p).toBeCloseTo(0.25);
     const ah = odds.find((o) => cardName(o.card) === "Ah")!;
     expect(ah.counters.map((c) => c.kind)).toEqual(["marriage"]);
+  });
+});
+
+/** Position with the given claims (legality is irrelevant to what a view shows). */
+function position(layout: number[], faceDown: number, p1: number[], p2: number[]): GameState {
+  const s = fromLayout(layout, faceDown, R);
+  let occupied = 0xffff, h0 = 0, h1 = 0, k0 = s.known[0], k1 = s.known[1];
+  for (const p of p1) { occupied &= ~(1 << p); h0 |= 1 << layout[p]; k0 |= 1 << p; }
+  for (const p of p2) { occupied &= ~(1 << p); h1 |= 1 << layout[p]; k1 |= 1 << p; }
+  return { ...s, occupied, claims: [p1, p2], hands: [h0, h1], known: [k0, k1], ref: -1 };
+}
+
+describe("four-card warnings", () => {
+  // column 0 holds the four Kings: Kh(0) Ks(4) Kd(8) Kc(12)
+  const L = "Kh Qh Ah Jh Ks Qs As Js Kd Qd Ad Jd Kc Qc Ac Jc".split(" ").map(parseCard);
+
+  it("warns when the opponent holds three of a rank and the fourth is open", () => {
+    const s = position(L, 0, [1, 3, 5], [0, 4, 8]);
+    expect(threats(viewFor(s, 0), 1)).toEqual([{ kind: "coup", index: 2, needs: parseCard("Kc"), pos: 12 }]);
+  });
+
+  it("no warning once the viewer holds the missing card", () => {
+    const s = position(L, 0, [12, 3, 5], [0, 4, 8]);
+    expect(threats(viewFor(s, 0), 1)).toEqual([]);
+  });
+
+  it("an unseen missing card gives a warning with no grid position", () => {
+    const s = position(L, 1 << 12, [1, 3, 5], [0, 4, 8]);
+    expect(threats(viewFor(s, 0), 1)).toEqual([{ kind: "coup", index: 2, needs: parseCard("Kc"), pos: null }]);
+  });
+
+  it("the opponent's face-down claims never count toward a warning", () => {
+    const s = position(L, 1 << 8, [1, 3, 5], [0, 4, 8]); // their Kd was face down
+    expect(threats(viewFor(s, 0), 1)).toEqual([]);
+  });
+
+  it("emits a threat event when the third card lands, for the opponent only", () => {
+    const before = viewFor(position(L, 0, [1, 3, 5], [0, 4]), 0);
+    const after = viewFor(position(L, 0, [1, 3, 5], [0, 4, 8]), 0);
+    expect(eventsBetween(before, after)).toContainEqual(
+      { type: "threat", owner: 1, threat: expect.objectContaining({ kind: "coup", index: 2 }) });
+    // the viewer's own near-sets produce no warning event
+    const mineBefore = viewFor(position(L, 0, [0, 4], [1, 3]), 0);
+    const mineAfter = viewFor(position(L, 0, [0, 4, 8], [1, 3]), 0);
+    expect(eventsBetween(mineBefore, mineAfter).filter((e) => e.type === "threat")).toEqual([]);
   });
 });

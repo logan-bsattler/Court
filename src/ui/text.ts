@@ -13,6 +13,11 @@ export function comboName(c: Combo): string {
   }
 }
 
+/** Name of a four-card set, e.g. "Full Court ♠" or "Coup of Kings". */
+export function setName(kind: "fullCourt" | "coup", index: number): string {
+  return kind === "fullCourt" ? `Full Court ${SUIT_SYMBOLS[index]}` : `Coup of ${plural(index)}`;
+}
+
 export function counterText(c: CounterFired, opponentName: string): string {
   const pair = bits(c.mask).map(cardLabel).join(" ");
   return c.kind === "deposition"

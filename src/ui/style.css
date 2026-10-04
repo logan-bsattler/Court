@@ -306,3 +306,14 @@ button.cell { cursor: pointer; }
 .stats-table th, .stats-table td { padding: 8px 4px; font-size: 13px; }
 td.win { color: var(--win); }
 td.loss { color: var(--red); }
+
+/* ---------- four-card warnings ---------- */
+
+.chip.warn { background: rgba(240, 170, 60, 0.2); color: #ffd28a; border-color: rgba(240, 170, 60, 0.5); text-decoration: none; }
+.toast.warn { background: #e9a23b; color: #2a1800; font-size: 15px; }
+.warn-badge {
+  position: absolute; left: -4px; top: -4px; width: 24px; height: 24px; border-radius: 50%; z-index: 2;
+  display: flex; align-items: center; justify-content: center; font-size: 13px;
+  background: #e9a23b; color: #2a1800; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+.cell.warned { outline: 2px dashed #e9a23b; outline-offset: 2px; }

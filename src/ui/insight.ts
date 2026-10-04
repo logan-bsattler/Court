@@ -1,4 +1,4 @@
-import { ACE, type Card, QUEEN, rankOf, suitOf } from "../engine/cards";
+import { ACE, type Card, QUEEN, RANK_MASKS, SUIT_MASKS, bits, popcount, rankOf, suitOf } from "../engine/cards";
 import type { Player, PlayerView } from "../engine/game";
 import { type Allocation, type Combo, type CounterFired, allocate } from "../engine/scoring";
 
@@ -24,9 +24,44 @@ export function visibleAllocation(view: PlayerView, owner: Player): Allocation {
   return allocate(knownHand(view, owner), knownHand(view, (1 - owner) as Player), view.rules);
 }
 
+/** A player one card short of a Full Court or Coup, as far as the viewer can see. */
+export interface Threat {
+  kind: "fullCourt" | "coup";
+  /** Suit for fullCourt, rank for coup. */
+  index: number;
+  /** The one card still needed. */
+  needs: Card;
+  /** Grid position of that card if the viewer can see it on the grid, else null (unseen). */
+  pos: number | null;
+}
+
+/**
+ * Four-card sets `owner` is one card from completing. Only `owner`'s visible
+ * cards count, and a set is not a threat if the viewer holds the missing card.
+ */
+export function threats(view: PlayerView, owner: Player): Threat[] {
+  const hand = knownHand(view, owner);
+  const blockers = owner === view.player ? 0 : knownHand(view, view.player);
+  const taken = knownHand(view, 0) | knownHand(view, 1);
+  const out: Threat[] = [];
+  const check = (kind: Threat["kind"], index: number, set: number) => {
+    if (popcount(hand & set) !== 3) return;
+    const needs = bits(set & ~hand)[0];
+    if ((blockers >> needs) & 1) return;
+    // the other player's visible claim already took it
+    if (((taken & ~hand) >> needs) & 1) return;
+    const p = view.cells.findIndex((c, i) => c === needs && ((view.occupied >> i) & 1) === 1);
+    out.push({ kind, index, needs, pos: p >= 0 ? p : null });
+  };
+  for (let s = 0; s < 4; s++) check("fullCourt", s, SUIT_MASKS[s]);
+  for (let r = 0; r < 4; r++) check("coup", r, RANK_MASKS[r]);
+  return out;
+}
+
 export type InsightEvent =
   | { type: "combo"; owner: Player; combo: Combo }
-  | { type: "countered"; victim: Player; counter: CounterFired };
+  | { type: "countered"; victim: Player; counter: CounterFired }
+  | { type: "threat"; owner: Player; threat: Threat };
 
 const comboKey = (c: Combo) => `${c.kind}:${c.index}`;
 const counterKey = (c: CounterFired) => `${c.kind}:${c.suit}`;
@@ -41,6 +76,11 @@ export function eventsBetween(before: PlayerView, after: PlayerView): InsightEve
     for (const c of now.combos) if (!c.countered && !had.has(comboKey(c))) out.push({ type: "combo", owner, combo: c });
     const hit = new Set(was.counters.map(counterKey));
     for (const k of now.counters) if (!hit.has(counterKey(k))) out.push({ type: "countered", victim: owner, counter: k });
+    // warnings are about the opponent only
+    if (owner !== after.player) {
+      const known = new Set(threats(before, owner).map((t) => `${t.kind}:${t.index}`));
+      for (const t of threats(after, owner)) if (!known.has(`${t.kind}:${t.index}`)) out.push({ type: "threat", owner, threat: t });
+    }
   }
   return out;
 }

@@ -7,7 +7,7 @@ import { load, save } from "./storage";
  * call is fire-and-forget: feedback must never break the game.
  */
 
-export type Cue = "claim" | "combo" | "countered" | "win" | "loss" | "draw" | "tap";
+export type Cue = "claim" | "combo" | "countered" | "warn" | "win" | "loss" | "draw" | "tap";
 
 export const settings = {
   get sound(): boolean { return load("sound", true); },
@@ -48,6 +48,7 @@ const SOUNDS: Record<Cue, () => void> = {
   tap: () => tone(660, 0, 0.05, "triangle", 0.08),
   claim: () => { tone(420, 0, 0.07, "triangle", 0.12); tone(840, 0.02, 0.05, "sine", 0.05); },
   combo: () => [523, 659, 784].forEach((f, i) => tone(f, i * 0.08, 0.22, "triangle")),
+  warn: () => { tone(880, 0, 0.09, "square", 0.07); tone(880, 0.14, 0.09, "square", 0.07); },
   countered: () => { tone(196, 0, 0.25, "sawtooth", 0.1); tone(147, 0.1, 0.3, "sawtooth", 0.08); },
   win: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.11, 0.3, "triangle")),
   loss: () => [392, 330, 262].forEach((f, i) => tone(f, i * 0.14, 0.32, "sine")),
@@ -58,7 +59,7 @@ function haptic(cue: Cue): void {
   try {
     if (cue === "claim" || cue === "tap") void Haptics.impact({ style: ImpactStyle.Light }).catch(() => {});
     else if (cue === "combo" || cue === "win") void Haptics.notification({ type: NotificationType.Success }).catch(() => {});
-    else if (cue === "countered" || cue === "loss") void Haptics.notification({ type: NotificationType.Warning }).catch(() => {});
+    else if (cue === "countered" || cue === "loss" || cue === "warn") void Haptics.notification({ type: NotificationType.Warning }).catch(() => {});
   } catch {
     /* no haptics on this device */
   }
