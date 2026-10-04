@@ -139,10 +139,12 @@ export interface DealResult {
   allocations: [Allocation, Allocation];
   /** Player 1 score minus player 2 score. */
   margin: number;
+  /** Final hands (card-id masks), for match tiebreaks. */
+  hands: [number, number];
 }
 
 export function result(s: GameState): DealResult {
   const a0 = allocate(s.hands[0], s.hands[1], s.rules);
   const a1 = allocate(s.hands[1], s.hands[0], s.rules);
-  return { scores: [a0.total, a1.total], allocations: [a0, a1], margin: a0.total - a1.total };
+  return { scores: [a0.total, a1.total], allocations: [a0, a1], margin: a0.total - a1.total, hands: [s.hands[0], s.hands[1]] };
 }

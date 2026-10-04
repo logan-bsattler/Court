@@ -5,6 +5,7 @@ import { score } from "../engine/scoring";
 import { renderGrid, renderHand } from "./board";
 import { cardSvg } from "./cards";
 import { button, el, sleep } from "./dom";
+import { TIEBREAKS, TIEBREAK_LABELS } from "./match";
 import { comboTable } from "./text";
 
 /** Fixed demo layout: a shuffled-looking deck so the steps are repeatable. */
@@ -150,7 +151,7 @@ export function runTutorial(root: HTMLElement, rules: RulesConfig, onDone: () =>
     },
     {
       title: "The match",
-      text: "A match is two deals with seats swapped — you go first in one and second in the other — and scores are summed. Aces and Queens attack; Kings and Jacks build. Good luck.",
+      text: `A match is two deals with seats swapped — you go first in one and second in the other — and scores are summed. Level totals go to a tiebreak: ${TIEBREAKS.map((tb) => `most ${TIEBREAK_LABELS[tb]}`).join(", then ")}. Aces and Queens attack; Kings and Jacks build. Good luck.`,
     },
   ];
 

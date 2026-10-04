@@ -11,7 +11,8 @@ import { type Allocation, score } from "../engine/scoring";
 import { renderGrid, renderHand } from "./board";
 import { button, el, sleep } from "./dom";
 import {
-  DEALS_PER_MATCH, type Match, aiSeat, finishDeal, hasNextDeal, humanSeat, newMatch, outcome, startNextDeal, totals,
+  DEALS_PER_MATCH, TIEBREAKS, TIEBREAK_LABELS, type Match, aiSeat, finishDeal, hasNextDeal, humanSeat, newMatch,
+  startNextDeal, tiebreakTotals, totals, verdict,
 } from "./match";
 import { load, save } from "./storage";
 import { comboName, comboTable, counterText } from "./text";
@@ -324,8 +325,18 @@ export class App {
   private matchResult(): void {
     const m = this.m;
     const t = totals(m);
-    const o = outcome(m);
-    const headline = o === "win" ? "You win the match!" : o === "loss" ? "Opponent wins the match" : "Match drawn";
+    const v = verdict(m);
+    const o = v.outcome;
+    const onTiebreak = v.decidedBy ? " on tiebreak" : "";
+    const headline = o === "win" ? `You win the match${onTiebreak}!` : o === "loss" ? `Opponent wins the match${onTiebreak}` : "Match drawn";
+    // when the score is level, show every tiebreak up to the one that decided it
+    const level = t.human === t.ai;
+    const shown = level ? TIEBREAKS.slice(0, v.decidedBy ? TIEBREAKS.indexOf(v.decidedBy) + 1 : TIEBREAKS.length) : [];
+    const tbRows = shown.map((tb) => {
+      const tt = tiebreakTotals(m, tb);
+      return el("tr", { class: `tiebreak ${tb === v.decidedBy ? "decider" : ""}` },
+        el("td", { text: `Tiebreak: ${TIEBREAK_LABELS[tb]}` }), el("td", { text: `${tt.human}` }), el("td", { text: `${tt.ai}` }));
+    });
     const rows = m.results.map((r, i) =>
       el("tr", {}, el("td", { text: `Deal ${i + 1} (you ${humanSeat(i) === 0 ? "1st" : "2nd"})` }),
         el("td", { text: `${r.scores[humanSeat(i)]}` }), el("td", { text: `${r.scores[aiSeat(i)]}` })));
@@ -337,7 +348,8 @@ export class App {
         el("table", { class: "match-table" },
           el("thead", {}, el("tr", {}, el("th", { text: "" }), el("th", { text: "You" }), el("th", { text: "Opp." }))),
           el("tbody", {}, ...rows,
-            el("tr", { class: "sum" }, el("td", { text: "Total" }), el("td", { text: `${t.human}` }), el("td", { text: `${t.ai}` })))),
+            el("tr", { class: "sum" }, el("td", { text: "Total" }), el("td", { text: `${t.human}` }), el("td", { text: `${t.ai}` })),
+            ...tbRows)),
         el("div", { class: "actions" },
           button("Play again", () => this.startMatch(), "btn primary big"),
           button("Home", () => this.home(), "btn"),
@@ -365,7 +377,7 @@ export class App {
       serviceCounterOn(r) ? el("p", {}, el("b", { text: "Service counter: " }), document.createTextNode(`a Service scores ${r.counteredService} if your opponent holds that suit's Queen. Its Jack and Ace become Retainers.`)) : null,
       el("p", { class: "muted", text: "Counters work even when the Ace or Queen is part of the opponent's own combination. They never affect a Full Court." }),
       el("h4", { text: "Match" }),
-      el("p", { text: "Two deals with seats swapped; scores are summed. A tied match is a draw." }),
+      el("p", { text: `Two deals with seats swapped; scores are summed. If the totals are level, the tiebreak is most ${TIEBREAKS.map((tb) => TIEBREAK_LABELS[tb]).join(", then most ")} over both deals. Only if those are level too is the match drawn.` }),
     );
     this.overlay("Rules", body, [[inGame ? "Back to game" : "Close", () => {}]]);
   }

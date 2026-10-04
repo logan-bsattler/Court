@@ -36,6 +36,8 @@ export interface DealRecord {
   combos: [string[], string[]];
   /** Per player: counters that cost them points. */
   countered: [string[], string[]];
+  /** Per player: final hand as a card-id mask. */
+  hands: [number, number];
 }
 
 const [name, nArg, out, startArg] = process.argv.slice(2);
@@ -55,6 +57,7 @@ for (let i = start; i < start + n; i++) {
     i, seed, margin: res.margin, scores: res.scores,
     combos: [0, 1].map((p) => res.allocations[p].combos.map((c) => c.kind + (c.countered ? "!" : ""))) as [string[], string[]],
     countered: [0, 1].map((p) => res.allocations[p].counters.map((c) => c.kind)) as [string[], string[]],
+    hands: [s.hands[0], s.hands[1]],
   });
   if ((i - start + 1) % 10 === 0) {
     writeFileSync(out, JSON.stringify({ config: name, rules: r, records }));

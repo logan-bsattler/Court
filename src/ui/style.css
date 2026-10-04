@@ -197,7 +197,10 @@ button.cell { cursor: pointer; }
 .match-table { width: 100%; border-collapse: collapse; font-size: 15px; }
 .match-table th, .match-table td { padding: 8px; text-align: right; border-bottom: 1px solid var(--panel-line); }
 .match-table th:first-child, .match-table td:first-child { text-align: left; }
-.match-table tr.sum td { font-weight: 800; color: var(--gold-2); border-bottom: 0; }
+.match-table tr.sum td { font-weight: 800; color: var(--gold-2); }
+.match-table tr.tiebreak td { font-size: 13px; color: var(--muted); }
+.match-table tr.tiebreak.decider td { color: var(--ink); font-weight: 700; }
+.match-table tr:last-child td { border-bottom: 0; }
 
 /* ---------- overlays ---------- */
 
