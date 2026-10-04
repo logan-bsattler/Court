@@ -295,3 +295,14 @@ button.cell { cursor: pointer; }
 .odds-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .odds-tags .chip { white-space: normal; }
 .odds-pct { color: var(--gold-2); font-size: 16px; }
+
+/* ---------- menu, settings, stats ---------- */
+
+.menu-row { display: flex; gap: 8px; }
+.menu-row .btn { flex: 1; padding: 10px 8px; }
+.btn.done { color: var(--win); border-color: rgba(143, 214, 162, 0.4); }
+.settings { display: flex; flex-direction: column; gap: 10px; margin: 6px 0; }
+.section-title { margin: 14px 0 0; font-size: 15px; color: var(--gold-2); }
+.stats-table th, .stats-table td { padding: 8px 4px; font-size: 13px; }
+td.win { color: var(--win); }
+td.loss { color: var(--red); }

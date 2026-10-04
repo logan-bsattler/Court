@@ -18,6 +18,9 @@ import { load, save } from "./storage";
 import { type InsightEvent, eventsBetween, hiddenOdds, visibleAllocation } from "./insight";
 import { comboName, comboTable, counterText } from "./text";
 import { runTutorial } from "./tutorial";
+import { cue, settings } from "./feedback";
+import { dailySeeds, utcDate } from "./daily";
+import { loadStats, recordMatch, resetStats } from "./stats";
 
 const AI_MIN_THINK_MS = 650;
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
@@ -36,6 +39,8 @@ export class App {
   private hintPending = false;
   /** Combinations and counters from the last claim, to animate on the next render. */
   private events: InsightEvent[] = [];
+  /** When the last toast shown will have finished. */
+  private toastsUntil = 0;
   private status = "";
   private statusIsError = false;
 
@@ -50,6 +55,7 @@ export class App {
   /** Switch to a new screen, cancelling any in-flight AI turn. */
   private navigate(...children: HTMLElement[]): void {
     this.generation++;
+    document.querySelector(".toasts")?.replaceChildren(); // toasts belong to the game screen
     this.show(...children);
     window.scrollTo(0, 0);
   }
@@ -68,6 +74,11 @@ export class App {
       seg.append(b);
     }
     const tutorialSeen = load("tutorialSeen", false);
+    const today = utcDate();
+    const dailyDone = loadStats().daily[today];
+    const dailyLabel = dailyDone
+      ? `Daily match ✓ ${resultText(dailyDone)}`
+      : "Daily match";
     this.navigate(
       el("main", { class: "screen home" },
         el("div", { class: "logo-cards", html: [12, 9, 6].map((c) => `<div class="logo-card">${cardSvg(c)}</div>`).join("") }),
@@ -76,10 +87,14 @@ export class App {
         el("div", { class: "menu" },
           el("label", { class: "label", text: "Opponent" }),
           seg,
-          this.hintSwitch(),
           button("Play match", () => this.startMatch(), "btn primary big"),
+          button(dailyLabel, () => this.startMatch(true), `btn ${dailyDone ? "done" : ""}`),
           button("How to play", () => this.tutorial(), `btn ${tutorialSeen ? "" : "pulse"}`),
-          button("Rules", () => this.rulesSheet(), "btn ghost"),
+          el("div", { class: "menu-row" },
+            button("Stats", () => this.statsScreen(), "btn ghost"),
+            button("Settings", () => this.settingsSheet(), "btn ghost"),
+            button("Rules", () => this.rulesSheet(), "btn ghost"),
+          ),
         ),
         el("p", { class: "fineprint", text: `Two deals per match, seats swapped. ${this.rules.faceDown} cards dealt face down.` }),
       ),
@@ -96,11 +111,18 @@ export class App {
 
   // ---------------------------------------------------------------- match
 
-  startMatch(): void {
-    const param = Number(new URLSearchParams(location.search).get("seed"));
-    const base = Number.isFinite(param) && param > 0 ? param >>> 0 : randomSeed();
-    const seeds = Array.from({ length: DEALS_PER_MATCH }, (_, i) => (base + i) >>> 0);
+  startMatch(daily = false): void {
+    let seeds: number[];
+    const today = utcDate();
+    if (daily) {
+      seeds = dailySeeds(today);
+    } else {
+      const param = Number(new URLSearchParams(location.search).get("seed"));
+      const base = Number.isFinite(param) && param > 0 ? param >>> 0 : randomSeed();
+      seeds = Array.from({ length: DEALS_PER_MATCH }, (_, i) => (base + i) >>> 0);
+    }
     this.match = newMatch(this.rules, seeds);
+    if (daily) this.match.daily = today;
     this.flash = undefined;
     this.hint = undefined;
     this.hintPending = false;
@@ -136,7 +158,8 @@ export class App {
     }
     this.status = "Grid empty — scoring…";
     this.renderGame(false);
-    await sleep(900);
+    // let a toast from the final claim finish before the score screen
+    await sleep(Math.max(900, this.toastsUntil - performance.now()));
     if (!live()) return;
     finishDeal(m);
     this.dealResult();
@@ -167,6 +190,7 @@ export class App {
     const before = viewFor(m.state, me);
     m.state = applyClaim(m.state, pos);
     this.events = eventsBetween(before, viewFor(m.state, me));
+    cue("claim");
   }
 
   /** Chips for the combinations a player visibly holds right now. */
@@ -187,6 +211,9 @@ export class App {
     this.events = [];
     if (!events.length) return;
     const me = humanSeat(this.m.dealIndex);
+    const good = events.some((e) => (e.type === "combo" && e.owner === me) || (e.type === "countered" && e.victim !== me));
+    const bad = events.some((e) => e.type === "countered" && e.victim === me);
+    setTimeout(() => cue(bad ? "countered" : good ? "combo" : "tap"), 120);
     let layer = document.querySelector<HTMLElement>(".toasts");
     if (!layer) {
       layer = el("div", { class: "toasts", attrs: { "aria-live": "polite" } });
@@ -202,6 +229,7 @@ export class App {
       const toast = el("div", { class: `toast ${cls}`, text, attrs: { style: `animation-delay:${i * 0.25}s` } });
       layer!.append(toast);
       setTimeout(() => toast.remove(), 2400 + i * 250);
+      this.toastsUntil = Math.max(this.toastsUntil, performance.now() + 2200 + i * 250);
       const mask = e.type === "combo" ? e.combo.mask : e.counter.mask;
       const side = mine ? ".player.me" : ".player.opp";
       for (const c of bits(mask)) {
@@ -226,18 +254,6 @@ export class App {
     this.overlay("What could it be?", el("div", { class: "odds" },
       el("p", { text: `It's one of the ${odds.length} cards you haven't seen. Each is equally likely: about ${pct}%.` }),
       ...rows), [["Close", () => {}]]);
-  }
-
-  private hintSwitch(): HTMLElement {
-    const input = el("input", { attrs: { type: "checkbox", role: "switch" } });
-    input.checked = this.hintsOn;
-    input.addEventListener("change", () => {
-      this.hintsOn = input.checked;
-      save("hints", this.hintsOn);
-    });
-    return el("label", { class: "switch-row" },
-      el("span", {}, el("b", { text: "Hints" }), el("span", { class: "muted", text: " — show the best pick on request" })),
-      input);
   }
 
   /** Ask the hard-level AI for the best claim from the human's own view (it never sees unseen cards). */
@@ -402,6 +418,14 @@ export class App {
     const t = totals(m);
     const v = verdict(m);
     const o = v.outcome;
+    if (!m.recorded) {
+      m.recorded = true;
+      recordMatch({
+        difficulty: this.difficulty, outcome: o, onTiebreak: v.decidedBy !== null,
+        dealScores: m.results.map((r, i) => r.scores[humanSeat(i)]), you: t.human, opp: t.ai, daily: m.daily,
+      });
+      setTimeout(() => cue(o), 200);
+    }
     const onTiebreak = v.decidedBy ? " on tiebreak" : "";
     const headline = o === "win" ? `You win the match${onTiebreak}!` : o === "loss" ? `Opponent wins the match${onTiebreak}` : "Match drawn";
     // when the score is level, show every tiebreak up to the one that decided it
@@ -417,7 +441,7 @@ export class App {
         el("td", { text: `${r.scores[humanSeat(i)]}` }), el("td", { text: `${r.scores[aiSeat(i)]}` })));
     this.navigate(
       el("main", { class: "screen results" },
-        el("h2", { text: "Match over" }),
+        el("h2", { text: m.daily ? `Daily match · ${m.daily}` : "Match over" }),
         el("p", { class: `headline big ${o}`, text: headline }),
         m.hintsUsed ? el("p", { class: "fineprint", text: `Hints used: ${m.hintsUsed}` }) : null,
         el("table", { class: "match-table" },
@@ -434,6 +458,64 @@ export class App {
   }
 
   // ---------------------------------------------------------------- overlays
+
+  private toggle(label: string, desc: string, get: () => boolean, set: (v: boolean) => void): HTMLElement {
+    const input = el("input", { attrs: { type: "checkbox", role: "switch" } });
+    input.checked = get();
+    input.addEventListener("change", () => { set(input.checked); if (input.checked) cue("tap"); });
+    return el("label", { class: "switch-row" },
+      el("span", {}, el("b", { text: label }), el("span", { class: "muted", text: ` — ${desc}` })),
+      input);
+  }
+
+  private settingsSheet(): void {
+    const body = el("div", { class: "settings" },
+      this.toggle("Sound", "card and combo sounds", () => settings.sound, (v) => { settings.sound = v; }),
+      this.toggle("Haptics", "vibrate on claims and combos", () => settings.haptics, (v) => { settings.haptics = v; }),
+      this.toggle("Hints", "show the best pick on request", () => this.hintsOn, (v) => { this.hintsOn = v; save("hints", v); }),
+    );
+    this.overlay("Settings", body, [["Done", () => {}]]);
+  }
+
+  private statsScreen(): void {
+    const s = loadStats();
+    const pct = (a: number, b: number) => (b ? `${Math.round((100 * a) / b)}%` : "–");
+    const rows = DIFFICULTIES.map((d) => {
+      const l = s.levels[d];
+      return el("tr", {},
+        el("td", { text: d[0].toUpperCase() + d.slice(1) }),
+        el("td", { text: `${l.played}` }),
+        el("td", { text: `${l.won}/${l.drawn}/${l.lost}` }),
+        el("td", { text: pct(l.won, l.played) }),
+        el("td", { text: `${l.bestStreak}` }),
+        el("td", { text: l.played ? `${l.bestDealScore}` : "–" }));
+    });
+    const days = Object.keys(s.daily).sort().reverse().slice(0, 7);
+    this.navigate(
+      el("main", { class: "screen results" },
+        el("h2", { text: "Stats" }),
+        el("table", { class: "match-table stats-table" },
+          el("thead", {}, el("tr", {}, ...["", "Played", "W/D/L", "Win %", "Best streak", "Best deal"].map((h) => el("th", { text: h })))),
+          el("tbody", {}, ...rows)),
+        el("h3", { class: "section-title", text: "Daily matches" }),
+        days.length
+          ? el("table", { class: "match-table" }, el("tbody", {}, ...days.map((d) => {
+              const r = s.daily[d];
+              return el("tr", {}, el("td", { text: d }), el("td", { text: r.difficulty }),
+                el("td", { class: r.outcome, text: resultText(r) }));
+            })))
+          : el("p", { class: "muted", text: "No daily matches yet. Everyone gets the same two deals each day." }),
+        el("p", { class: "fineprint", text: "Stats are kept on this device only." }),
+        el("div", { class: "actions" },
+          button("Home", () => this.home(), "btn primary big"),
+          button("Reset stats", () => this.overlay("Reset stats?", el("p", { text: "This clears all match history on this device." }), [
+            ["Cancel", () => {}],
+            ["Reset", () => { resetStats(); this.statsScreen(); }],
+          ]), "btn ghost"),
+        ),
+      ),
+    );
+  }
 
   rulesSheet(inGame = false): void {
     const r = this.rules;
@@ -469,6 +551,11 @@ export class App {
     );
     document.body.append(backdrop);
   }
+}
+
+function resultText(r: { outcome: string; you: number; opp: number; tiebreak?: boolean }): string {
+  const word = r.outcome === "win" ? "Won" : r.outcome === "loss" ? "Lost" : "Drew";
+  return `${word}${r.tiebreak && r.outcome !== "draw" ? " on tiebreak" : ""} ${r.you}–${r.opp}`;
 }
 
 function handOf(claims: readonly number[], cells: readonly (Card | null)[]): number {

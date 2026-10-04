@@ -20,6 +20,10 @@ export interface Match {
   readonly results: DealResult[];
   /** Number of hints the human asked for. */
   hintsUsed: number;
+  /** UTC date when this is the daily match. */
+  daily?: string;
+  /** Set once the result has been written to stats. */
+  recorded?: boolean;
 }
 
 /** The human is player 1 in the first deal and player 2 in the second. */
