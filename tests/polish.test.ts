@@ -40,3 +40,13 @@ describe("stats", () => {
     expect(s.levels.medium.played).toBe(2);
   });
 });
+
+describe("continuous session stats", () => {
+  it("tallies sessions by deal", async () => {
+    const { withSession } = await import("../src/ui/stats");
+    let s = withSession(emptyStats(), "hard", { won: 3, drawn: 4, lost: 1 });
+    s = withSession(s, "hard", { won: 1, drawn: 0, lost: 2 });
+    expect(s.continuous.hard).toEqual({ sessions: 2, deals: 11, won: 4, drawn: 4, lost: 3 });
+    expect(s.levels.hard.played).toBe(0);
+  });
+});

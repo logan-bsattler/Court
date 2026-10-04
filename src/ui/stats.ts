@@ -15,8 +15,18 @@ export interface LevelStats {
   bestStreak: number;
 }
 
+/** Continuous sessions are tallied by deal, not as matches. */
+export interface SessionStats {
+  sessions: number;
+  deals: number;
+  won: number;
+  drawn: number;
+  lost: number;
+}
+
 export interface Stats {
   levels: Record<Difficulty, LevelStats>;
+  continuous: Record<Difficulty, SessionStats>;
   /** Daily match results by UTC date (YYYY-MM-DD). */
   daily: Record<string, { outcome: MatchOutcome; you: number; opp: number; difficulty: Difficulty; tiebreak?: boolean }>;
 }
@@ -25,8 +35,11 @@ const emptyLevel = (): LevelStats => ({
   played: 0, won: 0, drawn: 0, lost: 0, tiebreakWins: 0, bestDealScore: 0, streak: 0, bestStreak: 0,
 });
 
+const emptySession = (): SessionStats => ({ sessions: 0, deals: 0, won: 0, drawn: 0, lost: 0 });
+
 export const emptyStats = (): Stats => ({
   levels: { easy: emptyLevel(), medium: emptyLevel(), hard: emptyLevel() },
+  continuous: { easy: emptySession(), medium: emptySession(), hard: emptySession() },
   daily: {},
 });
 
@@ -34,7 +47,10 @@ export function loadStats(): Stats {
   const s = load<Stats | null>("stats", null);
   if (!s || typeof s !== "object" || !s.levels) return emptyStats();
   const base = emptyStats();
-  for (const d of ["easy", "medium", "hard"] as Difficulty[]) base.levels[d] = { ...emptyLevel(), ...s.levels[d] };
+  for (const d of ["easy", "medium", "hard"] as Difficulty[]) {
+    base.levels[d] = { ...emptyLevel(), ...s.levels[d] };
+    base.continuous[d] = { ...emptySession(), ...s.continuous?.[d] };
+  }
   base.daily = s.daily ?? {};
   return base;
 }
@@ -52,7 +68,7 @@ export interface MatchRecord {
 
 /** Pure update, so it can be tested without storage. */
 export function withMatch(s: Stats, r: MatchRecord): Stats {
-  const next: Stats = { levels: { ...s.levels }, daily: { ...s.daily } };
+  const next: Stats = { levels: { ...s.levels }, continuous: { ...s.continuous }, daily: { ...s.daily } };
   const l = { ...next.levels[r.difficulty] };
   l.played++;
   if (r.outcome === "win") { l.won++; l.streak++; if (r.onTiebreak) l.tiebreakWins++; }
@@ -64,6 +80,22 @@ export function withMatch(s: Stats, r: MatchRecord): Stats {
     next.daily[r.daily] = { outcome: r.outcome, you: r.you, opp: r.opp, difficulty: r.difficulty, tiebreak: r.onTiebreak };
   }
   return next;
+}
+
+export function withSession(s: Stats, difficulty: Difficulty, deals: { won: number; drawn: number; lost: number }): Stats {
+  const c = { ...s.continuous[difficulty] };
+  c.sessions++;
+  c.deals += deals.won + deals.drawn + deals.lost;
+  c.won += deals.won;
+  c.drawn += deals.drawn;
+  c.lost += deals.lost;
+  return { ...s, continuous: { ...s.continuous, [difficulty]: c } };
+}
+
+export function recordSession(difficulty: Difficulty, deals: { won: number; drawn: number; lost: number }): Stats {
+  const s = withSession(loadStats(), difficulty, deals);
+  save("stats", s);
+  return s;
 }
 
 export function recordMatch(r: MatchRecord): Stats {

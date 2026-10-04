@@ -151,7 +151,7 @@ export function runTutorial(root: HTMLElement, rules: RulesConfig, onDone: () =>
     },
     {
       title: "The match",
-      text: `A match is two deals with seats swapped — you go first in one and second in the other — and scores are summed. Level totals go to a tiebreak: ${TIEBREAKS.map((tb) => `most ${TIEBREAK_LABELS[tb]}`).join(", then ")}. Aces and Queens attack; Kings and Jacks build. Good luck.`,
+      text: `A Classic match is two deals with seats swapped — you go first in one and second in the other — and scores are summed. Level totals go to a tiebreak: ${TIEBREAKS.map((tb) => `most ${TIEBREAK_LABELS[tb]}`).join(", then ")}. You can also play First to 2 (first to win two deals) or a Continuous session from the home screen. Aces and Queens attack; Kings and Jacks build. Good luck.`,
     },
   ];
 

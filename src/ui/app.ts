@@ -11,8 +11,9 @@ import { type Allocation, score } from "../engine/scoring";
 import { renderGrid, renderHand } from "./board";
 import { button, el, sleep } from "./dom";
 import {
-  DEALS_PER_MATCH, TIEBREAKS, TIEBREAK_LABELS, type Match, aiSeat, finishDeal, hasNextDeal, humanSeat, newMatch,
-  startNextDeal, tiebreakTotals, totals, verdict,
+  DEALS_PER_MATCH, DEAL_WINS_NEEDED, LONG_MATCH_CAP, MATCH_MODES, MODE_LABELS, type Match, type MatchMode, TIEBREAKS,
+  TIEBREAK_LABELS, aiSeat, dealWins, finishDeal, hasNextDeal, humanSeat, newMatch, startNextDeal, tiebreakTotals, totals,
+  verdict,
 } from "./match";
 import { load, save } from "./storage";
 import { type InsightEvent, eventsBetween, hiddenOdds, threats, visibleAllocation } from "./insight";
@@ -20,7 +21,7 @@ import { comboName, comboTable, counterText, setName } from "./text";
 import { runTutorial } from "./tutorial";
 import { cue, settings } from "./feedback";
 import { dailySeeds, utcDate } from "./daily";
-import { loadStats, recordMatch, resetStats } from "./stats";
+import { loadStats, recordMatch, recordSession, resetStats } from "./stats";
 
 const AI_MIN_THINK_MS = 650;
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
@@ -29,6 +30,7 @@ export class App {
   private readonly ai = new AiClient();
   private readonly rules: RulesConfig = DEFAULT_RULES;
   private difficulty: Difficulty = load<Difficulty>("difficulty", "medium");
+  private mode: MatchMode = load<MatchMode>("mode", "classic");
   private match: Match | null = null;
   /** Bumped whenever the screen changes, so stale async AI turns stop. */
   private generation = 0;
@@ -46,6 +48,7 @@ export class App {
 
   constructor(private readonly root: HTMLElement) {
     if (!DIFFICULTIES.includes(this.difficulty)) this.difficulty = "medium";
+    if (!MATCH_MODES.includes(this.mode)) this.mode = "classic";
   }
 
   private show(...children: HTMLElement[]): void {
@@ -73,6 +76,21 @@ export class App {
       b.setAttribute("role", "radio");
       seg.append(b);
     }
+    const modeSeg = el("div", { class: "segmented", attrs: { role: "radiogroup", "aria-label": "Match type" } });
+    const modeNote = el("p", { class: "mode-note", text: modeDescription(this.mode) });
+    const playLabel = (md: MatchMode) => (md === "continuous" ? "Start session" : "Play match");
+    const playBtn = button(playLabel(this.mode), () => this.startMatch(), "btn primary big");
+    for (const md of MATCH_MODES) {
+      const b = button(MODE_LABELS[md], () => {
+        this.mode = md;
+        save("mode", md);
+        modeSeg.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+        modeNote.textContent = modeDescription(md);
+        playBtn.textContent = playLabel(md);
+      }, `seg ${md === this.mode ? "on" : ""}`);
+      b.setAttribute("role", "radio");
+      modeSeg.append(b);
+    }
     const tutorialSeen = load("tutorialSeen", false);
     const today = utcDate();
     const dailyDone = loadStats().daily[today];
@@ -87,7 +105,10 @@ export class App {
         el("div", { class: "menu" },
           el("label", { class: "label", text: "Opponent" }),
           seg,
-          button("Play match", () => this.startMatch(), "btn primary big"),
+          el("label", { class: "label", text: "Match" }),
+          modeSeg,
+          modeNote,
+          playBtn,
           button(dailyLabel, () => this.startMatch(true), `btn ${dailyDone ? "done" : ""}`),
           button("How to play", () => this.tutorial(), `btn ${tutorialSeen ? "" : "pulse"}`),
           el("div", { class: "menu-row" },
@@ -96,7 +117,7 @@ export class App {
             button("Rules", () => this.rulesSheet(), "btn ghost"),
           ),
         ),
-        el("p", { class: "fineprint", text: `Two deals per match, seats swapped. ${this.rules.faceDown} cards dealt face down.` }),
+        el("p", { class: "fineprint", text: `Seats swap every deal. ${this.rules.faceDown} cards dealt face down. The daily match is always Classic.` }),
       ),
     );
   }
@@ -121,7 +142,7 @@ export class App {
       const base = Number.isFinite(param) && param > 0 ? param >>> 0 : randomSeed();
       seeds = Array.from({ length: DEALS_PER_MATCH }, (_, i) => (base + i) >>> 0);
     }
-    this.match = newMatch(this.rules, seeds);
+    this.match = newMatch(this.rules, seeds, daily ? "classic" : this.mode);
     if (daily) this.match.daily = today;
     this.flash = undefined;
     this.hint = undefined;
@@ -309,8 +330,8 @@ export class App {
     const header = el("header", { class: "topbar" },
       button("✕", () => this.confirmQuit(), "icon-btn"),
       el("div", { class: "topbar-mid" },
-        el("div", { class: "deal-no", text: `Deal ${m.dealIndex + 1} of ${DEALS_PER_MATCH} · you play ${me === 0 ? "first" : "second"}` }),
-        m.dealIndex > 0 ? el("div", { class: "match-score", text: `Match: You ${t.human} – ${t.ai} Opponent` }) : null,
+        el("div", { class: "deal-no", text: `Deal ${m.dealIndex + 1}${m.mode === "classic" ? ` of ${DEALS_PER_MATCH}` : ""} · you play ${me === 0 ? "first" : "second"}` }),
+        m.dealIndex > 0 ? el("div", { class: "match-score", text: this.matchLine(m, t) }) : null,
       ),
       button("?", () => this.rulesSheet(true), "icon-btn"),
     );
@@ -368,10 +389,28 @@ export class App {
   }
 
   private confirmQuit(): void {
+    const m = this.m;
+    if (m.mode === "continuous" && m.results.length > 0) {
+      this.overlay("End this session?", el("p", { text: "The deal in progress won't count. Finished deals are kept in your session summary." }), [
+        ["Keep playing", () => {}],
+        ["End session", () => this.matchResult()],
+      ]);
+      return;
+    }
     this.overlay("Leave this match?", el("p", { text: "The match in progress will be lost." }), [
       ["Keep playing", () => {}],
       ["Leave", () => { this.match = null; this.home(); }],
     ]);
+  }
+
+  /** Running score line for the header. */
+  private matchLine(m: Match, t: { human: number; ai: number }): string {
+    if (m.mode === "classic") return `Match: You ${t.human} – ${t.ai} Opponent`;
+    const w = dealWins(m);
+    const draws = w.draws ? ` (${w.draws} drawn)` : "";
+    return m.mode === "firstTo2"
+      ? `First to ${DEAL_WINS_NEEDED}: You ${w.human} – ${w.ai} Opponent${draws}`
+      : `Deals won: You ${w.human} – ${w.ai} Opponent${draws}`;
   }
 
   // ---------------------------------------------------------------- results
@@ -392,6 +431,7 @@ export class App {
         this.scorePanel("You", m.state, r.allocations[me], "the opponent's"),
         this.scorePanel("Opponent", m.state, r.allocations[opp], "your"),
         m.state.faceDown ? el("p", { class: "legend", html: "<i></i>dealt face down" }) : null,
+        m.mode !== "classic" ? el("p", { class: "match-line", text: this.matchLine(m, totals(m)) }) : null,
         el("div", { class: "actions" },
           next
             ? button(`Deal ${m.dealIndex + 2} — you play ${humanSeat(m.dealIndex + 1) === 0 ? "first" : "second"}`, () => {
@@ -400,6 +440,7 @@ export class App {
                 void this.playTurns();
               }, "btn primary big")
             : button("Match result", () => this.matchResult(), "btn primary big"),
+          m.mode === "continuous" ? button("End session", () => this.matchResult(), "btn") : null,
         ),
         el("p", { class: "fineprint", text: `Deal seed ${m.seeds[m.dealIndex]}` }),
       ),
@@ -433,34 +474,52 @@ export class App {
 
   private matchResult(): void {
     const m = this.m;
+    if (m.results.length === 0) { this.match = null; this.home(); return; }
     const t = totals(m);
     const v = verdict(m);
     const o = v.outcome;
+    const w = dealWins(m);
     if (!m.recorded) {
       m.recorded = true;
-      recordMatch({
-        difficulty: this.difficulty, outcome: o, onTiebreak: v.decidedBy !== null,
-        dealScores: m.results.map((r, i) => r.scores[humanSeat(i)]), you: t.human, opp: t.ai, daily: m.daily,
-      });
+      if (m.mode === "continuous") {
+        recordSession(this.difficulty, { won: w.human, drawn: w.draws, lost: w.ai });
+      } else {
+        recordMatch({
+          difficulty: this.difficulty, outcome: o, onTiebreak: v.decidedBy !== null,
+          dealScores: m.results.map((r, i) => r.scores[humanSeat(i)]), you: t.human, opp: t.ai, daily: m.daily,
+        });
+      }
       setTimeout(() => cue(o), 200);
     }
     const onTiebreak = v.decidedBy ? " on tiebreak" : "";
-    const headline = o === "win" ? `You win the match${onTiebreak}!` : o === "loss" ? `Opponent wins the match${onTiebreak}` : "Match drawn";
-    // when the score is level, show every tiebreak up to the one that decided it
-    const level = t.human === t.ai;
+    let headline = o === "win" ? `You win the match${onTiebreak}!` : o === "loss" ? `Opponent wins the match${onTiebreak}` : "Match drawn";
+    if (m.mode === "continuous") {
+      const deals = (n: number) => `${n} deal${n === 1 ? "" : "s"}`;
+      headline = o === "win" ? `You won ${deals(w.human)} to ${w.ai}!` : o === "loss" ? `Opponent won ${deals(w.ai)} to ${w.human}` : `Level at ${deals(w.human)} each`;
+    } else if (v.byDeals) {
+      headline = o === "win" ? `You win ${w.human}–${w.ai} in deals!` : `Opponent wins ${w.ai}–${w.human} in deals`;
+    }
+    const capNote = m.mode === "firstTo2" && !v.byDeals
+      ? `No one reached ${DEAL_WINS_NEEDED} deal wins in ${LONG_MATCH_CAP} deals, so total score decided it.` : "";
+    // when the score decided a level match, show every tiebreak up to the one that settled it
+    const level = t.human === t.ai && !v.byDeals;
     const shown = level ? TIEBREAKS.slice(0, v.decidedBy ? TIEBREAKS.indexOf(v.decidedBy) + 1 : TIEBREAKS.length) : [];
     const tbRows = shown.map((tb) => {
       const tt = tiebreakTotals(m, tb);
       return el("tr", { class: `tiebreak ${tb === v.decidedBy ? "decider" : ""}` },
         el("td", { text: `Tiebreak: ${TIEBREAK_LABELS[tb]}` }), el("td", { text: `${tt.human}` }), el("td", { text: `${tt.ai}` }));
     });
-    const rows = m.results.map((r, i) =>
-      el("tr", {}, el("td", { text: `Deal ${i + 1} (you ${humanSeat(i) === 0 ? "1st" : "2nd"})` }),
-        el("td", { text: `${r.scores[humanSeat(i)]}` }), el("td", { text: `${r.scores[aiSeat(i)]}` })));
+    const rows = m.results.map((r, i) => {
+      const you = r.scores[humanSeat(i)], opp = r.scores[aiSeat(i)];
+      return el("tr", {}, el("td", { text: `Deal ${i + 1} (you ${humanSeat(i) === 0 ? "1st" : "2nd"})` }),
+        el("td", { class: you > opp ? "win" : "", text: `${you}` }), el("td", { class: opp > you ? "loss" : "", text: `${opp}` }));
+    });
     this.navigate(
       el("main", { class: "screen results" },
-        el("h2", { text: m.daily ? `Daily match · ${m.daily}` : "Match over" }),
+        el("h2", { text: m.daily ? `Daily match · ${m.daily}` : m.mode === "continuous" ? "Session over" : "Match over" }),
         el("p", { class: `headline big ${o}`, text: headline }),
+        m.mode !== "classic" ? el("p", { class: "match-line", text: `Deals: you won ${w.human}, opponent won ${w.ai}, ${w.draws} drawn` }) : null,
+        capNote ? el("p", { class: "fineprint", text: capNote }) : null,
         m.hintsUsed ? el("p", { class: "fineprint", text: `Hints used: ${m.hintsUsed}` }) : null,
         el("table", { class: "match-table" },
           el("thead", {}, el("tr", {}, el("th", { text: "" }), el("th", { text: "You" }), el("th", { text: "Opp." }))),
@@ -468,7 +527,7 @@ export class App {
             el("tr", { class: "sum" }, el("td", { text: "Total" }), el("td", { text: `${t.human}` }), el("td", { text: `${t.ai}` })),
             ...tbRows)),
         el("div", { class: "actions" },
-          button("Play again", () => this.startMatch(), "btn primary big"),
+          button(m.mode === "continuous" ? "New session" : "Play again", () => this.startMatch(Boolean(m.daily)), "btn primary big"),
           button("Home", () => this.home(), "btn"),
         ),
       ),
@@ -512,9 +571,20 @@ export class App {
     this.navigate(
       el("main", { class: "screen results" },
         el("h2", { text: "Stats" }),
+        el("p", { class: "match-line", text: "Matches (Classic and First to 2)" }),
         el("table", { class: "match-table stats-table" },
           el("thead", {}, el("tr", {}, ...["", "Played", "W/D/L", "Win %", "Best streak", "Best deal"].map((h) => el("th", { text: h })))),
           el("tbody", {}, ...rows)),
+        el("h3", { class: "section-title", text: "Continuous sessions" }),
+        DIFFICULTIES.some((d) => s.continuous[d].sessions)
+          ? el("table", { class: "match-table stats-table" },
+              el("thead", {}, el("tr", {}, ...["", "Sessions", "Deals", "W/D/L", "Deal win %"].map((h) => el("th", { text: h })))),
+              el("tbody", {}, ...DIFFICULTIES.filter((d) => s.continuous[d].sessions).map((d) => {
+                const c = s.continuous[d];
+                return el("tr", {}, el("td", { text: d[0].toUpperCase() + d.slice(1) }), el("td", { text: `${c.sessions}` }),
+                  el("td", { text: `${c.deals}` }), el("td", { text: `${c.won}/${c.drawn}/${c.lost}` }), el("td", { text: pct(c.won, c.deals) }));
+              })))
+          : el("p", { class: "muted", text: "No continuous sessions yet." }),
         el("h3", { class: "section-title", text: "Daily matches" }),
         days.length
           ? el("table", { class: "match-table" }, el("tbody", {}, ...days.map((d) => {
@@ -552,7 +622,10 @@ export class App {
       serviceCounterOn(r) ? el("p", {}, el("b", { text: "Service counter: " }), document.createTextNode(`a Service scores ${r.counteredService} if your opponent holds that suit's Queen. Its Jack and Ace become Retainers.`)) : null,
       el("p", { class: "muted", text: "Counters work even when the Ace or Queen is part of the opponent's own combination. They never affect a Full Court." }),
       el("h4", { text: "Match" }),
-      el("p", { text: `Two deals with seats swapped; scores are summed. If the totals are level, the tiebreak is most ${TIEBREAKS.map((tb) => TIEBREAK_LABELS[tb]).join(", then most ")} over both deals. Only if those are level too is the match drawn.` }),
+      el("p", {}, el("b", { text: "Classic: " }), document.createTextNode(`two deals with seats swapped; scores are summed. If the totals are level, the tiebreak is most ${TIEBREAKS.map((tb) => TIEBREAK_LABELS[tb]).join(", then most ")} over both deals. Only if those are level too is the match drawn.`)),
+      el("p", {}, el("b", { text: "First to 2: " }), document.createTextNode(`the first to win ${DEAL_WINS_NEEDED} deals wins. Drawn deals don't count. If nobody has ${DEAL_WINS_NEEDED} wins after ${LONG_MATCH_CAP} deals, total score decides (then the tiebreak).`)),
+      el("p", {}, el("b", { text: "Continuous: " }), document.createTextNode("play deal after deal and end the session whenever you like. Deals won decide the session.")),
+      el("p", { class: "muted", text: "In every format, seats swap each deal." }),
     );
     this.overlay("Rules", body, [[inGame ? "Back to game" : "Close", () => {}]]);
   }
@@ -568,6 +641,14 @@ export class App {
       ),
     );
     document.body.append(backdrop);
+  }
+}
+
+function modeDescription(m: MatchMode): string {
+  switch (m) {
+    case "classic": return "Two deals, scores summed.";
+    case "firstTo2": return `First to win ${DEAL_WINS_NEEDED} deals. Usually 3–8 deals.`;
+    case "continuous": return "Keep playing deals; stop whenever you like.";
   }
 }
 

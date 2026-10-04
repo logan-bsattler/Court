@@ -4,7 +4,8 @@ import { type DealResult, applyClaim, isOver, legalClaims } from "../src/engine/
 import { allocate } from "../src/engine/scoring";
 import { DEFAULT_RULES } from "../src/engine/rules";
 import {
-  TIEBREAKS, aiSeat, finishDeal, hasNextDeal, humanSeat, newMatch, outcome, startNextDeal, tiebreakTotals, totals, verdict,
+  LONG_MATCH_CAP, TIEBREAKS, aiSeat, dealWins, finishDeal, hasNextDeal, humanSeat, newMatch, outcome, startNextDeal,
+  tiebreakTotals, totals, verdict,
 } from "../src/ui/match";
 
 describe("match", () => {
@@ -69,5 +70,63 @@ describe("match tiebreak", () => {
   it("only a match level on every tiebreak is drawn", () => {
     const m = matchOf(["Jc", "Jd"], ["Kc", "Kd"]);
     expect(verdict(m)).toEqual({ outcome: "draw", decidedBy: null });
+  });
+});
+
+describe("match modes", () => {
+  const R = DEFAULT_RULES;
+  /** A finished deal where the human scores `h` and the opponent `a`, seated for deal index i. */
+  const fakeDeal = (i: number, h: number, a: number): DealResult => {
+    const scores: [number, number] = i % 2 === 0 ? [h, a] : [a, h];
+    const empty = { total: 0, combos: [], retainers: [], retainerValue: 0, counters: [] };
+    return { scores, allocations: [{ ...empty, total: scores[0] }, { ...empty, total: scores[1] }], margin: scores[0] - scores[1], hands: [0, 0] };
+  };
+  const play = (mode: "firstTo2" | "continuous", deals: [number, number][]) => {
+    const m = newMatch(R, [100], mode);
+    deals.forEach(([h, a], i) => {
+      if (i > 0) startNextDeal(m);
+      m.results[i] = fakeDeal(i, h, a);
+    });
+    return m;
+  };
+
+  it("first to 2: drawn deals do not count, two deal wins end it", () => {
+    const m = play("firstTo2", [[10, 10], [12, 8], [9, 9], [11, 10]]);
+    expect(dealWins(m)).toEqual({ human: 2, ai: 0, draws: 2 });
+    expect(hasNextDeal(m)).toBe(false);
+    expect(verdict(m)).toEqual({ outcome: "win", decidedBy: null, byDeals: true });
+  });
+
+  it("first to 2: deal wins beat a higher total score", () => {
+    const m = play("firstTo2", [[20, 8], [10, 11], [10, 11]]);
+    expect(totals(m).human).toBeGreaterThan(totals(m).ai);
+    expect(verdict(m).outcome).toBe("loss");
+  });
+
+  it("first to 2: still undecided means another deal", () => {
+    const m = play("firstTo2", [[12, 8], [9, 9]]);
+    expect(hasNextDeal(m)).toBe(true);
+    expect(m.seeds.length).toBe(2); // seeds are extended on demand
+    expect(m.state.seed).toBe(101);
+  });
+
+  it(`first to 2: after ${LONG_MATCH_CAP} deals without a winner, the score decides`, () => {
+    const deals: [number, number][] = Array.from({ length: LONG_MATCH_CAP }, (_, i) => (i === 0 ? [14, 8] : [10, 10]));
+    const m = play("firstTo2", deals);
+    expect(hasNextDeal(m)).toBe(false);
+    expect(verdict(m)).toEqual({ outcome: "win", decidedBy: null });
+  });
+
+  it("continuous: always another deal, judged on deals won", () => {
+    const m = play("continuous", [[12, 8], [8, 12], [8, 12], [10, 10]]);
+    expect(hasNextDeal(m)).toBe(true);
+    expect(dealWins(m)).toEqual({ human: 1, ai: 2, draws: 1 });
+    expect(verdict(m).outcome).toBe("loss");
+  });
+
+  it("seats keep alternating in long matches", () => {
+    const m = play("continuous", [[1, 0], [1, 0], [1, 0]]);
+    expect([0, 1, 2].map(humanSeat)).toEqual([0, 1, 0]);
+    expect(m.results.map((r) => r.margin)).toEqual([1, -1, 1]);
   });
 });
