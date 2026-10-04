@@ -28,7 +28,7 @@ export interface AiLevel {
 
 export const LEVELS: Record<Difficulty, AiLevel> = {
   easy: { worlds: 2, minWorlds: 1, timeBudgetMs: 800, tolerance: 3 },
-  medium: { worlds: 6, minWorlds: 2, timeBudgetMs: 2500, tolerance: 0.5 },
+  medium: { worlds: 3, minWorlds: 2, timeBudgetMs: 2500, tolerance: 1.5 },
   hard: { worlds: 24, minWorlds: 4, timeBudgetMs: 6000, tolerance: 0 },
 };
 
