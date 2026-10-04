@@ -43,6 +43,14 @@ describe("scoring", () => {
     expect(score(h("Js As"), h("Ks Qs"), R)).toBe(2);
   });
 
+  it("a counter switched off in the config neither scores nor reports as fired", () => {
+    const off = rules({ deposedMarriage: 6, counteredService: 4 });
+    const a = allocate(h("Kh Qh Jd Ad"), h("Ah Qd"), off);
+    expect(a.total).toBe(10);
+    expect(a.combos.every((c) => !c.countered)).toBe(true);
+    expect(a.counters).toEqual([]);
+  });
+
   it("overlapping options take the higher-scoring allocation", () => {
     // Coup of Kings (12) + 4 Retainers beats Marriage (6) + 6 Retainers
     const coup = h("Ks Kh Kd Kc Qs Jd Jc Ah");

@@ -65,7 +65,8 @@ export function availableCombos(hand: number, opponent: number, r: RulesConfig):
   }
   for (let s = 0; s < 4; s++) {
     if ((hand & MARRIAGE_MASKS[s]) === MARRIAGE_MASKS[s]) {
-      const deposed = ((opponent >> ACE_CARDS[s]) & 1) === 1;
+      // a counter only "fires" when it actually lowers the value (it can be switched off in RulesConfig)
+      const deposed = ((opponent >> ACE_CARDS[s]) & 1) === 1 && r.deposedMarriage < r.marriage;
       out.push({
         kind: "marriage", index: s, mask: MARRIAGE_MASKS[s],
         value: deposed ? r.deposedMarriage : r.marriage, countered: deposed,
@@ -74,7 +75,7 @@ export function availableCombos(hand: number, opponent: number, r: RulesConfig):
   }
   for (let s = 0; s < 4; s++) {
     if ((hand & SERVICE_MASKS[s]) === SERVICE_MASKS[s]) {
-      const countered = ((opponent >> QUEEN_CARDS[s]) & 1) === 1;
+      const countered = ((opponent >> QUEEN_CARDS[s]) & 1) === 1 && r.counteredService < r.service;
       out.push({
         kind: "service", index: s, mask: SERVICE_MASKS[s],
         value: countered ? r.counteredService : r.service, countered,
